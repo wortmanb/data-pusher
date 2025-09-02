@@ -1,0 +1,169 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-pusher-config
+  namespace: elastic-stack
+data:
+  ES_INDEX_PREFIX: "df-logs"
+  ES_DOCS_PER_SECOND: "1000"
+  ES_BATCH_SIZE: "500"  
+  ES_THREADS: "4"
+  PUSH_DURATION: "0"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: data-pusher-auth
+  namespace: elastic-stack
+type: Opaque
+stringData:
+  ES_USERNAME: "bret"
+  ES_PASSWORD: "Benm1les"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-pusher
+  namespace: elastic-stack
+  labels:
+    app: data-pusher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-pusher
+  template:
+    metadata:
+      labels:
+        app: data-pusher
+    spec:
+      containers:
+      - name: data-pusher
+        image: ghcr.io/wortmanb/data-pusher:latest
+        imagePullPolicy: Always
+        command: ["/bin/sh", "-c"]
+        args: 
+          - "python data-pusher.py --index ${ES_INDEX_PREFIX} --rate ${ES_DOCS_PER_SECOND} --batch-size ${ES_BATCH_SIZE} --threads ${ES_THREADS} --duration ${PUSH_DURATION} --host https://elasticsearch.bwortman.us:443 --verbose"
+        env:
+        - name: ES_INDEX_PREFIX
+          valueFrom:
+            configMapKeyRef:
+              name: data-pusher-config
+              key: ES_INDEX_PREFIX
+        - name: ES_DOCS_PER_SECOND
+          valueFrom:
+            configMapKeyRef:
+              name: data-pusher-config
+              key: ES_DOCS_PER_SECOND
+        - name: ES_BATCH_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: data-pusher-config
+              key: ES_BATCH_SIZE
+        - name: ES_THREADS
+          valueFrom:
+            configMapKeyRef:
+              name: data-pusher-config
+              key: ES_THREADS
+        - name: PUSH_DURATION
+          valueFrom:
+            configMapKeyRef:
+              name: data-pusher-config
+              key: PUSH_DURATION
+        - name: ES_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: data-pusher-auth
+              key: ES_USERNAME
+        - name: ES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: data-pusher-auth
+              key: ES_PASSWORD
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 60
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      restartPolicy: Always
+      serviceAccountName: default
+      imagePullSecrets:
+      - name: ghcr-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-pusher-service
+  namespace: elastic-stack
+  labels:
+    app: data-pusher
+spec:
+  selector:
+    app: data-pusher
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: metrics
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: data-pusher
+  namespace: elastic-stack
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: elastic-stack
+  name: data-pusher-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: data-pusher-rolebinding
+  namespace: elastic-stack
+subjects:
+- kind: ServiceAccount
+  name: data-pusher
+  namespace: elastic-stack
+roleRef:
+  kind: Role
+  name: data-pusher-role
+  apiGroup: rbac.authorization.k8s.io

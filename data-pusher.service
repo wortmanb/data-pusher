@@ -1,0 +1,33 @@
+[Unit]
+Description=Elasticsearch Data Pusher
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=datapusher
+Group=datapusher
+WorkingDirectory=/opt/data-pusher
+ExecStart=/usr/bin/python3 /opt/data-pusher/data-pusher.py --index logs-%Y%m%d --rate 1000 --batch-size 500 --threads 4 --verbose
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=PYTHONPATH=/opt/data-pusher
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/data-pusher/logs
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
